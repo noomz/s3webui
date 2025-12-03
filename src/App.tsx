@@ -4,6 +4,15 @@ import {
   ArrowRight,
   ArrowUp,
   ArrowDownUp,
+  FileText,
+  FileArchive,
+  FileCode,
+  FileSpreadsheet,
+  FileType,
+  Image,
+  Music2,
+  Video,
+  Folder,
   Eye,
   FolderOpen,
   Home,
@@ -70,6 +79,19 @@ const readPrefixFromUrl = () => {
   if (typeof window === "undefined") return "";
   const url = new URL(window.location.href);
   return url.searchParams.get("prefix") || "";
+};
+
+const fileIconForKey = (key: string) => {
+  const ext = (key.split(".").pop() || "").toLowerCase();
+  if (!ext || !key.includes(".")) return FileText;
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif"].includes(ext)) return Image;
+  if (["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return Video;
+  if (["mp3", "wav", "flac", "aac", "ogg", "m4a"].includes(ext)) return Music2;
+  if (["zip", "rar", "7z", "tar", "gz", "tgz"].includes(ext)) return FileArchive;
+  if (["xls", "xlsx", "csv", "ods", "numbers"].includes(ext)) return FileSpreadsheet;
+  if (["pdf", "doc", "docx", "pages", "odt", "rtf"].includes(ext)) return FileType;
+  if (["js", "ts", "tsx", "jsx", "json", "yml", "yaml", "html", "css", "scss", "md"].includes(ext)) return FileCode;
+  return FileText;
 };
 
 export function App() {
@@ -736,7 +758,9 @@ export function App() {
               <div key={folder.prefix} className="list-row">
                 <div className="selection-cell muted">—</div>
                 <div className="name" onClick={() => changePrefix(folder.prefix)}>
-                  <span className="name-icon">📁</span>
+                  <span className="name-icon" aria-hidden>
+                    <Folder size={16} />
+                  </span>
                   <Tippy
                     content={folder.name || "/"}
                     placement="top"
@@ -775,7 +799,12 @@ export function App() {
                   />
                 </div>
                 <div className="name">
-                  <span className="name-icon">📄</span>
+                  <span className="name-icon" aria-hidden>
+                    {(() => {
+                      const Icon = fileIconForKey(object.key);
+                      return <Icon size={16} />;
+                    })()}
+                  </span>
                   <Tippy
                     content={object.key}
                     placement="top"
