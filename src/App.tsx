@@ -1,0 +1,464 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Eye,
+  FolderOpen,
+  Home,
+  Link2,
+  Plus,
+  RefreshCcw,
+  Trash2,
+  Upload,
+  UploadCloud,
+} from "lucide-react";
+import { createFolder, deleteObject, fetchMeta, getLink, listObjects, uploadFiles } from "./client/api";
+import { UserManagement } from "./components/UserManagement";
+import { Login } from "./components/Login";
+import { useUsers } from "./hooks/useUsers";
+import type { BucketMeta, PermissionKey, S3Folder, S3ObjectSummary } from "./types";
+import { auth } from "./client/auth";
+
+const readableSize = (size: number) => {
+  if (!size) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const exponent = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
+  const value = size / 1024 ** exponent;
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[exponent]}`;
+};
+
+const prefixBreadcrumbs = (prefix: string) => {
+  const parts = prefix.split("/").filter(Boolean);
+  const crumbs = [];
+  let acc = "";
+  for (const part of parts) {
+    acc = `${acc}${part}/`;
+    crumbs.push({ label: part, value: acc });
+  }
+  return crumbs;
+};
+
+const copyToClipboard = async (text: string) => {
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+  }
+};
+
+export function App() {
+  const [meta, setMeta] = useState<BucketMeta | null>(null);
+  const [path, setPath] = useState(() => (typeof window !== "undefined" ? window.location.pathname : "/"));
+  const [prefix, setPrefix] = useState("");
+  const [folders, setFolders] = useState<S3Folder[]>([]);
+  const [objects, setObjects] = useState<S3ObjectSummary[]>([]);
+  const [nextToken, setNextToken] = useState<string | undefined>(undefined);
+  const [pageTokens, setPageTokens] = useState<string[]>([""]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [isAuthed, setIsAuthed] = useState(() => Boolean(auth.token));
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const isUnauthorized = (err: unknown) =>
+    err instanceof Error && /unauthorized/i.test(err.message || "");
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+
+  const { users, currentUser, currentUserId, setCurrentUserId, addUser, updateUser, updatePermissions, removeUser } =
+    useUsers();
+
+  const isAdminRoute = path.startsWith("/admin");
+
+  const permissions = useMemo(
+    () =>
+      currentUser?.permissions || {
+        list: false,
+        createFolder: false,
+        upload: false,
+        delete: false,
+        copyLink: false,
+        copySignedUrl: false,
+      },
+    [currentUser],
+  );
+
+  const loadObjects = useCallback(async () => {
+    if (!permissions.list) return;
+    setLoading(true);
+    setError(null);
+    setNextToken(undefined);
+    try {
+      const data = await listObjects({
+        prefix,
+        token: pageTokens[pageIndex] || undefined,
+        pageSize: 50,
+      });
+      setFolders(data.folders);
+      setObjects(data.objects);
+      setNextToken(data.nextToken);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to list objects";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    } finally {
+      setLoading(false);
+    }
+  }, [permissions.list, prefix, pageIndex, pageTokens]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    void (async () => {
+      try {
+        const info = await fetchMeta();
+        setMeta(info);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unable to load bucket metadata";
+        setError(msg);
+        if (isUnauthorized(err)) logout();
+      }
+    })();
+  }, [isAuthed]);
+
+  useEffect(() => {
+    if (!meta || !isAuthed) return;
+    void loadObjects();
+  }, [loadObjects, meta, isAuthed]);
+
+  useEffect(() => {
+    const handler = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  const navigate = (nextPath: string) => {
+    if (typeof window === "undefined") return;
+    window.history.pushState({}, "", nextPath);
+    setPath(nextPath);
+  };
+
+  const changePrefix = (nextPrefix: string) => {
+    setPrefix(nextPrefix);
+    setPageTokens([""]);
+    setPageIndex(0);
+    setNextToken(undefined);
+  };
+
+  const logout = () => {
+    auth.clear();
+    setIsAuthed(false);
+    setMeta(null);
+    setFolders([]);
+    setObjects([]);
+    setPrefix("");
+  };
+
+  const goUp = () => {
+    if (!prefix) return;
+    const parts = prefix.split("/").filter(Boolean);
+    parts.pop();
+    const nextPrefix = parts.length ? `${parts.join("/")}/` : "";
+    changePrefix(nextPrefix);
+  };
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+    try {
+      await createFolder({ prefix, name: newFolderName.trim() });
+      setNewFolderName("");
+      setMessage(`Created ${newFolderName}`);
+      void loadObjects();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to create folder";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
+  const handleUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setMessage(`Uploading ${files.length} item(s)...`);
+    try {
+      await uploadFiles(prefix, Array.from(files).map((file) => file as File & { webkitRelativePath?: string }));
+      setMessage("Upload complete");
+      void loadObjects();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (folderInputRef.current) folderInputRef.current.value = "";
+    }
+  };
+
+  const handleDelete = async (key: string) => {
+    if (!confirm(`Delete ${key}?`)) return;
+    try {
+      await deleteObject(key);
+      setMessage(`Deleted ${key}`);
+      void loadObjects();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to delete object";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
+  const handleCopyLink = async (key: string) => {
+    try {
+      const result = await getLink(key);
+      await copyToClipboard(result.url);
+      setMessage(`${result.kind === "public" ? "Public" : "Signed"} link copied`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to create link";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
+  const handlePreview = async (key: string) => {
+    try {
+      const result = await getLink(key);
+      window.open(result.url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to open preview";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
+  const can = (permission: PermissionKey) => Boolean(permissions[permission]);
+
+  if (!isAuthed) {
+    return (
+      <div className="page">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">S3 Web Admin</p>
+            <h1>Authentication required</h1>
+            <p className="muted">Enter the admin secret to continue</p>
+          </div>
+        </header>
+        <Login onSuccess={() => setIsAuthed(true)} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="page">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">S3 Web Admin</p>
+          <h1>{meta?.bucket || "Bucket not configured"}</h1>
+          <p className="muted">
+            {meta ? (
+              <>
+                Region {meta.region} · Default ACL {meta.defaultAcl} ·{" "}
+                {meta.publicByDefault ? "Objects public by default" : "Objects private by default"}
+              </>
+            ) : (
+              "Loading bucket metadata…"
+            )}
+          </p>
+        </div>
+        <div className="status">
+          <div className="status-actions">
+            <button className="ghost" onClick={logout}>
+              Logout
+            </button>
+            <button className="ghost" onClick={() => navigate(isAdminRoute ? "/" : "/admin")}>
+              {isAdminRoute ? "Go to bucket" : "Admin"}
+            </button>
+          </div>
+          {message && <span className="pill success">{message}</span>}
+          {error && <span className="pill danger">{error}</span>}
+        </div>
+      </header>
+
+      {!isAdminRoute && (
+        <section className="panel">
+          <header className="panel-header">
+            <div className="path-row">
+              <button className="ghost" onClick={goUp} disabled={!prefix} title="Up one level">
+                <ArrowUp size={16} /> Up
+              </button>
+              <div className="breadcrumbs">
+                <button className={!prefix ? "active crumb" : "crumb"} onClick={() => changePrefix("")} title="Root">
+                  <Home size={16} aria-hidden />
+                  <span>Root</span>
+                </button>
+                {prefixBreadcrumbs(prefix).map((crumb) => (
+                  <button
+                    key={crumb.value}
+                    className={crumb.value === prefix ? "active crumb" : "crumb"}
+                    onClick={() => changePrefix(crumb.value)}
+                    title={crumb.value}
+                  >
+                    <FolderOpen size={14} /> {crumb.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="actions">
+              <button onClick={() => loadObjects()} disabled={!can("list") || loading} title="Refresh">
+                <RefreshCcw size={16} /> Refresh
+              </button>
+              <div className="pagination">
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    if (pageIndex === 0) return;
+                    setPageIndex((i) => Math.max(0, i - 1));
+                  }}
+                  disabled={pageIndex === 0}
+                  title="Previous page"
+                >
+                  <ArrowLeft size={16} /> Prev
+                </button>
+                <span className="page-indicator">
+                  Page {pageIndex + 1}
+                  {nextToken ? "" : " (end)"}
+                </span>
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    if (!nextToken) return;
+                    setPageTokens((tokens) => {
+                      const copy = tokens.slice(0, pageIndex + 1);
+                      copy.push(nextToken);
+                      return copy;
+                    });
+                    setPageIndex((i) => i + 1);
+                  }}
+                  disabled={!nextToken}
+                  title="Next page"
+                >
+                  Next <ArrowRight size={16} />
+                </button>
+              </div>
+              <div className="upload-group">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                onChange={(event) => handleUpload(event.target.files)}
+                hidden
+              />
+              <button onClick={() => fileInputRef.current?.click()} disabled={!can("upload")} title="Upload files">
+                <Upload size={16} /> Upload files
+              </button>
+              <input
+                ref={folderInputRef}
+                type="file"
+                  multiple
+                  // @ts-expect-error - webkitdirectory is supported at runtime
+                  webkitdirectory="true"
+                onChange={(event) => handleUpload(event.target.files)}
+                hidden
+              />
+              <button onClick={() => folderInputRef.current?.click()} disabled={!can("upload")} title="Upload folder">
+                <UploadCloud size={16} /> Upload folder
+              </button>
+            </div>
+            <div className="create-folder">
+              <input
+                value={newFolderName}
+                  onChange={(event) => setNewFolderName(event.target.value)}
+                  placeholder="Folder name"
+                  disabled={!can("createFolder")}
+              />
+              <button
+                  className="ghost"
+                onClick={handleCreateFolder}
+                disabled={!can("createFolder") || !newFolderName.trim()}
+                title="Create folder"
+              >
+                <Plus size={16} /> Create
+              </button>
+            </div>
+          </div>
+        </header>
+
+          <div className="list">
+            <div className="list-head">
+              <span>Name</span>
+              <span>Size</span>
+              <span>Last modified</span>
+              <span>Actions</span>
+            </div>
+            {loading && <div className="empty">Loading...</div>}
+            {!loading && folders.length === 0 && objects.length === 0 && (
+              <div className="empty">Empty path</div>
+            )}
+            {folders.map((folder) => (
+              <div key={folder.prefix} className="list-row">
+                <div className="name" onClick={() => changePrefix(folder.prefix)}>
+                  📁 {folder.name || "/"}
+                </div>
+                <div className="muted">—</div>
+                <div className="muted">—</div>
+              <div className="row-actions">
+                  <button className="ghost" onClick={() => changePrefix(folder.prefix)} title="Open folder">
+                    <FolderOpen size={16} /> Open
+                  </button>
+                </div>
+              </div>
+            ))}
+            {objects.map((object) => (
+              <div key={object.key} className="list-row">
+                <div className="name">📄 {object.key.slice(prefix.length)}</div>
+                <div>{readableSize(object.size)}</div>
+              <div className="muted">{object.lastModified ? new Date(object.lastModified).toLocaleString() : "—"}</div>
+                <div className="row-actions">
+                  <button
+                    className="ghost icon"
+                    disabled={!can("copyLink")}
+                    onClick={() => handleCopyLink(object.key)}
+                    title="Copy link"
+                  >
+                    <Link2 size={16} />
+                  </button>
+                  <button
+                    className="ghost icon"
+                    disabled={!can("copyLink")}
+                    onClick={() => handlePreview(object.key)}
+                    title="Preview"
+                  >
+                    <Eye size={16} />
+                  </button>
+                  <button className="icon danger" disabled={!can("delete")} onClick={() => handleDelete(object.key)} title="Delete">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {isAdminRoute && (
+        <UserManagement
+          users={users}
+          currentUserId={currentUserId}
+          editingUserId={editingUserId}
+          onSelectUser={setCurrentUserId}
+          onAddUser={addUser}
+          onUpdateUser={updateUser}
+          onUpdatePermissions={updatePermissions}
+          onRemoveUser={removeUser}
+          onEdit={(id) => setEditingUserId(id)}
+          onDoneEditing={() => setEditingUserId(null)}
+        />
+      )}
+    </div>
+  );
+}
