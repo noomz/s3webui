@@ -36,17 +36,77 @@ export const bucketMeta: BucketMeta = {
 
 export async function fetchObjects(params: { prefix?: string; token?: string | null; pageSize?: number; search?: string } = {}) {
   const normalized = normalizePrefix(params.prefix || "");
+  const pageSize = params.pageSize || 50;
+
+  // When searching, scan the full prefix to collect matches then paginate locally by offset token
+  if (params.search) {
+    const searchLower = params.search.toLowerCase();
+    const matchedFolders: S3Folder[] = [];
+    const matchedObjects: S3ObjectSummary[] = [];
+    const seenFolderPrefixes = new Set<string>();
+    let continuationToken: string | undefined;
+
+    const offset = params.token ? Number(params.token) || 0 : 0;
+
+    do {
+      const response = await client.send(
+        new ListObjectsV2Command({
+          Bucket: serverConfig.bucket,
+          Prefix: normalized,
+          Delimiter: "/",
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000,
+        }),
+      );
+
+      response.CommonPrefixes?.forEach((item) => {
+        if (!item.Prefix) return;
+        if (!item.Prefix.toLowerCase().includes(searchLower)) return;
+        if (seenFolderPrefixes.has(item.Prefix)) return;
+        seenFolderPrefixes.add(item.Prefix);
+        const name = item.Prefix.slice(normalized.length).replace(/\/$/, "");
+        if (name.length > 0) {
+          matchedFolders.push({ name, prefix: item.Prefix });
+        }
+      });
+
+      response.Contents?.forEach((item) => {
+        if (!item.Key || item.Key === normalized) return;
+        if (!item.Key.toLowerCase().includes(searchLower)) return;
+        matchedObjects.push({
+          key: item.Key,
+          size: item.Size ?? 0,
+          lastModified: item.LastModified?.toISOString(),
+        });
+      });
+
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+
+    matchedObjects.sort((a, b) => {
+      const aTime = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+      const bTime = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    const objectsPage = matchedObjects.slice(offset, offset + pageSize);
+    const nextToken = matchedObjects.length > offset + pageSize ? String(offset + pageSize) : undefined;
+
+    return { folders: matchedFolders, objects: objectsPage, nextToken };
+  }
+
+  // Default pagination path (no search filter)
   const response = await client.send(
     new ListObjectsV2Command({
       Bucket: serverConfig.bucket,
       Prefix: normalized,
       Delimiter: "/",
       ContinuationToken: params.token || undefined,
-      MaxKeys: params.pageSize || 50,
+      MaxKeys: pageSize,
     }),
   );
 
-  let folders =
+  const folders =
     response.CommonPrefixes?.map((item) => item.Prefix)
       .filter((p): p is string => Boolean(p))
       .map((fullPrefix) => ({
@@ -55,19 +115,12 @@ export async function fetchObjects(params: { prefix?: string; token?: string | n
       }))
       .filter((folder) => folder.name.length > 0) || [];
 
-  let objects =
+  const objects =
     response.Contents?.filter((item) => item.Key && item.Key !== normalized).map((item) => ({
       key: item.Key || "",
       size: item.Size ?? 0,
       lastModified: item.LastModified?.toISOString(),
     })) || [];
-
-  // Apply search filter if provided
-  if (params.search) {
-    const searchLower = params.search.toLowerCase();
-    folders = folders.filter((folder) => folder.name.toLowerCase().includes(searchLower));
-    objects = objects.filter((obj) => obj.key.toLowerCase().includes(searchLower));
-  }
 
   objects.sort((a, b) => {
     const aTime = a.lastModified ? new Date(a.lastModified).getTime() : 0;
