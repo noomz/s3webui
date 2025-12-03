@@ -63,10 +63,16 @@ const copyToClipboard = async (text: string) => {
   }
 };
 
+const readPrefixFromUrl = () => {
+  if (typeof window === "undefined") return "";
+  const url = new URL(window.location.href);
+  return url.searchParams.get("prefix") || "";
+};
+
 export function App() {
   const [meta, setMeta] = useState<BucketMeta | null>(null);
   const [path, setPath] = useState(() => (typeof window !== "undefined" ? window.location.pathname : "/"));
-  const [prefix, setPrefix] = useState("");
+  const [prefix, setPrefix] = useState(readPrefixFromUrl());
   const [folders, setFolders] = useState<S3Folder[]>([]);
   const [objects, setObjects] = useState<S3ObjectSummary[]>([]);
   const [nextToken, setNextToken] = useState<string | undefined>(undefined);
@@ -189,7 +195,13 @@ export function App() {
   }, [loadObjects, meta, isAuthed]);
 
   useEffect(() => {
-    const handler = () => setPath(window.location.pathname);
+    const handler = () => {
+      setPath(window.location.pathname);
+      setPrefix(readPrefixFromUrl());
+      setPageTokens([""]);
+      setPageIndex(0);
+      setNextToken(undefined);
+    };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, []);
@@ -221,6 +233,17 @@ export function App() {
     setPageTokens([""]);
     setPageIndex(0);
     setNextToken(undefined);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.pathname = "/";
+      if (nextPrefix) {
+        url.searchParams.set("prefix", nextPrefix);
+      } else {
+        url.searchParams.delete("prefix");
+      }
+      window.history.pushState({ prefix: nextPrefix }, "", url);
+      setPath(url.pathname);
+    }
   };
 
   const logout = () => {
