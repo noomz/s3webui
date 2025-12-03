@@ -14,11 +14,12 @@ export async function fetchMeta(): Promise<BucketMeta> {
   return toJson(res);
 }
 
-export async function listObjects(params: { prefix?: string; token?: string | null; pageSize?: number }) {
+export async function listObjects(params: { prefix?: string; token?: string | null; pageSize?: number; search?: string }) {
   const url = new URL("/api/list", window.location.origin);
   if (params.prefix) url.searchParams.set("prefix", params.prefix);
   if (params.token) url.searchParams.set("token", params.token);
   if (params.pageSize) url.searchParams.set("pageSize", String(params.pageSize));
+  if (params.search) url.searchParams.set("search", params.search);
   const res = await authorizedFetch(url);
   return toJson(res) as Promise<{ folders: S3Folder[]; objects: S3ObjectSummary[]; nextToken?: string }>;
 }

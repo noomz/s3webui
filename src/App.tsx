@@ -9,6 +9,7 @@ import {
   Link2,
   Plus,
   RefreshCcw,
+  Search,
   Trash2,
   Upload,
   UploadCloud,
@@ -75,12 +76,12 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [isAuthed, setIsAuthed] = useState(() => Boolean(auth.token));
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>("");
-  const isUnauthorized = (err: unknown) =>
-    err instanceof Error && /unauthorized/i.test(err.message || "");
+  const isUnauthorized = (err: unknown) => err instanceof Error && /unauthorized/i.test(err.message || "");
 
   const syncCurrentUser = (list: User[]) => {
     if (!list.length) {
@@ -113,22 +114,19 @@ export function App() {
 
   const isAdminRoute = path.startsWith("/admin");
 
-  const permissions = useMemo(
-    () => {
-      const currentUser = users.find((u) => u.id === currentUserId);
-      return (
-        currentUser?.permissions || {
-          list: false,
-          createFolder: false,
-          upload: false,
-          delete: false,
-          copyLink: false,
-          copySignedUrl: false,
-        }
-      );
-    },
-    [users, currentUserId],
-  );
+  const permissions = useMemo(() => {
+    const currentUser = users.find((u) => u.id === currentUserId);
+    return (
+      currentUser?.permissions || {
+        list: false,
+        createFolder: false,
+        upload: false,
+        delete: false,
+        copyLink: false,
+        copySignedUrl: false,
+      }
+    );
+  }, [users, currentUserId]);
 
   const loadObjects = useCallback(async () => {
     if (!permissions.list) return;
@@ -140,6 +138,7 @@ export function App() {
         prefix,
         token: pageTokens[pageIndex] || undefined,
         pageSize: 50,
+        search: searchQuery || undefined,
       });
       setFolders(data.folders);
       setObjects(data.objects);
@@ -151,7 +150,7 @@ export function App() {
     } finally {
       setLoading(false);
     }
-  }, [permissions.list, prefix, pageIndex, pageTokens]);
+  }, [permissions.list, prefix, pageIndex, pageTokens, searchQuery]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -171,6 +170,12 @@ export function App() {
     if (!isAuthed) return;
     void loadUsers();
   }, [isAuthed, loadUsers]);
+
+  useEffect(() => {
+    // Reset pagination when search query changes
+    setPageIndex(0);
+    setPageTokens([""]);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (!meta || !isAuthed) return;
@@ -234,7 +239,10 @@ export function App() {
       if (!files || files.length === 0) return;
       setMessage(`Uploading ${files.length} item(s)...`);
       try {
-        await uploadFiles(prefix, Array.from(files).map((file) => file as File & { webkitRelativePath?: string }));
+        await uploadFiles(
+          prefix,
+          Array.from(files).map((file) => file as File & { webkitRelativePath?: string }),
+        );
         setMessage("Upload complete");
         await loadObjects();
       } catch (err) {
@@ -474,43 +482,61 @@ export function App() {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                onChange={(event) => handleUpload(event.target.files)}
-                hidden
-              />
-              <button onClick={() => fileInputRef.current?.click()} disabled={!can("upload")} title="Upload files">
-                <Upload size={16} /> Upload files
-              </button>
-              <input
-                ref={folderInputRef}
-                type="file"
+                  onChange={(event) => handleUpload(event.target.files)}
+                  hidden
+                />
+                <button onClick={() => fileInputRef.current?.click()} disabled={!can("upload")} title="Upload files">
+                  <Upload size={16} /> Upload files
+                </button>
+                <input
+                  ref={folderInputRef}
+                  type="file"
                   multiple
                   // @ts-expect-error - webkitdirectory is supported at runtime
                   webkitdirectory="true"
-                onChange={(event) => handleUpload(event.target.files)}
-                hidden
-              />
-              <button onClick={() => folderInputRef.current?.click()} disabled={!can("upload")} title="Upload folder">
-                <UploadCloud size={16} /> Upload folder
-              </button>
-            </div>
-            <div className="create-folder">
-              <input
-                value={newFolderName}
+                  onChange={(event) => handleUpload(event.target.files)}
+                  hidden
+                />
+                <button onClick={() => folderInputRef.current?.click()} disabled={!can("upload")} title="Upload folder">
+                  <UploadCloud size={16} /> Upload folder
+                </button>
+              </div>
+              <div className="create-folder">
+                <input
+                  value={newFolderName}
                   onChange={(event) => setNewFolderName(event.target.value)}
                   placeholder="Folder name"
                   disabled={!can("createFolder")}
-              />
-              <button
+                />
+                <button
                   className="ghost"
-                onClick={handleCreateFolder}
-                disabled={!can("createFolder") || !newFolderName.trim()}
-                title="Create folder"
-              >
-                <Plus size={16} /> Create
-              </button>
+                  onClick={handleCreateFolder}
+                  disabled={!can("createFolder") || !newFolderName.trim()}
+                  title="Create folder"
+                >
+                  <Plus size={16} /> Create
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <div className="search-row" style={{ padding: "12px 18px" }}>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <Search size={16} style={{ color: "#6b7280" }} />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search by object key..."
+                title="Search by key name"
+                style={{ flex: 1, padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: "4px" }}
+              />
+              {searchQuery && (
+                <button className="ghost" onClick={() => setSearchQuery("")} title="Clear search">
+                  Clear
+                </button>
+              )}
             </div>
           </div>
-        </header>
 
           <div className="list">
             <div className="list-head">
@@ -520,9 +546,7 @@ export function App() {
               <span>Actions</span>
             </div>
             {loading && <div className="empty">Loading...</div>}
-            {!loading && folders.length === 0 && objects.length === 0 && (
-              <div className="empty">Empty path</div>
-            )}
+            {!loading && folders.length === 0 && objects.length === 0 && <div className="empty">Empty path</div>}
             {folders.map((folder) => (
               <div key={folder.prefix} className="list-row">
                 <div className="name" onClick={() => changePrefix(folder.prefix)}>
@@ -530,9 +554,17 @@ export function App() {
                 </div>
                 <div className="muted">—</div>
                 <div className="muted">—</div>
-              <div className="row-actions">
+                <div className="row-actions">
                   <button className="ghost" onClick={() => changePrefix(folder.prefix)} title="Open folder">
                     <FolderOpen size={16} /> Open
+                  </button>
+                  <button
+                    className="icon danger"
+                    disabled={!can("delete")}
+                    onClick={() => handleDelete(folder.prefix)}
+                    title="Delete folder"
+                  >
+                    <Trash2 size={16} />
                   </button>
                 </div>
               </div>
@@ -541,7 +573,9 @@ export function App() {
               <div key={object.key} className="list-row">
                 <div className="name">📄 {object.key.slice(prefix.length)}</div>
                 <div>{readableSize(object.size)}</div>
-              <div className="muted">{object.lastModified ? new Date(object.lastModified).toLocaleString() : "—"}</div>
+                <div className="muted">
+                  {object.lastModified ? new Date(object.lastModified).toLocaleString() : "—"}
+                </div>
                 <div className="row-actions">
                   <button
                     className="ghost icon"
@@ -559,7 +593,12 @@ export function App() {
                   >
                     <Eye size={16} />
                   </button>
-                  <button className="icon danger" disabled={!can("delete")} onClick={() => handleDelete(object.key)} title="Delete">
+                  <button
+                    className="icon danger"
+                    disabled={!can("delete")}
+                    onClick={() => handleDelete(object.key)}
+                    title="Delete"
+                  >
                     <Trash2 size={16} />
                   </button>
                 </div>

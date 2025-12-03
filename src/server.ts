@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import {
   bucketMeta,
   createFolder,
+  deleteFolder,
   deleteObject,
   fetchObjects,
   getReadableUrl,
@@ -81,7 +82,8 @@ async function handleApi(req: Request) {
       const prefix = url.searchParams.get("prefix") || "";
       const token = url.searchParams.get("token");
       const pageSize = Number(url.searchParams.get("pageSize") || 50);
-      const data = await fetchObjects({ prefix, token, pageSize });
+      const search = url.searchParams.get("search") || undefined;
+      const data = await fetchObjects({ prefix, token, pageSize, search });
       return sendJson(data);
     }
 
@@ -135,7 +137,12 @@ async function handleApi(req: Request) {
     if (pathname === "/api/delete" && req.method === "POST") {
       const body = await req.json();
       if (!body?.key) return new Response("Key required", { status: 400 });
-      await deleteObject(body.key);
+      // If key ends with /, it's a folder - delete recursively
+      if (body.key.endsWith("/")) {
+        await deleteFolder(body.key);
+      } else {
+        await deleteObject(body.key);
+      }
       return sendJson({ ok: true });
     }
 

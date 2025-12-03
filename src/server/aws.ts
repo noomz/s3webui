@@ -1,5 +1,6 @@
 import {
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
@@ -33,7 +34,7 @@ export const bucketMeta: BucketMeta = {
   publicByDefault: objectsPublicByDefault,
 };
 
-export async function fetchObjects(params: { prefix?: string; token?: string | null; pageSize?: number } = {}) {
+export async function fetchObjects(params: { prefix?: string; token?: string | null; pageSize?: number; search?: string } = {}) {
   const normalized = normalizePrefix(params.prefix || "");
   const response = await client.send(
     new ListObjectsV2Command({
@@ -45,7 +46,7 @@ export async function fetchObjects(params: { prefix?: string; token?: string | n
     }),
   );
 
-  const folders =
+  let folders =
     response.CommonPrefixes?.map((item) => item.Prefix)
       .filter((p): p is string => Boolean(p))
       .map((fullPrefix) => ({
@@ -54,12 +55,19 @@ export async function fetchObjects(params: { prefix?: string; token?: string | n
       }))
       .filter((folder) => folder.name.length > 0) || [];
 
-  const objects =
+  let objects =
     response.Contents?.filter((item) => item.Key && item.Key !== normalized).map((item) => ({
       key: item.Key || "",
       size: item.Size ?? 0,
       lastModified: item.LastModified?.toISOString(),
     })) || [];
+
+  // Apply search filter if provided
+  if (params.search) {
+    const searchLower = params.search.toLowerCase();
+    folders = folders.filter((folder) => folder.name.toLowerCase().includes(searchLower));
+    objects = objects.filter((obj) => obj.key.toLowerCase().includes(searchLower));
+  }
 
   objects.sort((a, b) => {
     const aTime = a.lastModified ? new Date(a.lastModified).getTime() : 0;
@@ -110,6 +118,44 @@ export async function deleteObject(key: string) {
       Key: key,
     }),
   );
+}
+
+export async function deleteFolder(prefix: string) {
+  const normalized = normalizePrefix(prefix);
+  const allKeys: string[] = [];
+
+  // List all objects with this prefix
+  let continuationToken: string | undefined;
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: serverConfig.bucket,
+        Prefix: normalized,
+        ContinuationToken: continuationToken,
+      }),
+    );
+
+    if (response.Contents) {
+      allKeys.push(...response.Contents.map((item) => item.Key).filter((k): k is string => Boolean(k)));
+    }
+
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  // Delete all objects in batches of 1000 (S3 limit)
+  if (allKeys.length > 0) {
+    for (let i = 0; i < allKeys.length; i += 1000) {
+      const batch = allKeys.slice(i, i + 1000);
+      await client.send(
+        new DeleteObjectsCommand({
+          Bucket: serverConfig.bucket,
+          Delete: {
+            Objects: batch.map((key) => ({ Key: key })),
+          },
+        }),
+      );
+    }
+  }
 }
 
 export function objectPublicUrl(key: string) {
