@@ -255,6 +255,24 @@ input {
   color: #cbd5e1;
 }
 
+.sortable {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.sort-indicator {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
 .row-actions {
   display: flex;
   gap: 8px;

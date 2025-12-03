@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ArrowDownUp,
   Eye,
   FolderOpen,
   Home,
@@ -84,6 +85,7 @@ export function App() {
   const [newFolderName, setNewFolderName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [lastModifiedSort, setLastModifiedSort] = useState<"asc" | "desc">("desc");
   const [isAuthed, setIsAuthed] = useState(() => Boolean(auth.token));
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -315,6 +317,22 @@ export function App() {
     }
   };
 
+  const fetchAllObjectsForCopy = useCallback(async () => {
+    const all: S3ObjectSummary[] = [];
+    let token: string | undefined;
+    do {
+      const data = await listObjects({
+        prefix,
+        token,
+        pageSize: 200,
+        search: searchQuery || undefined,
+      });
+      all.push(...data.objects);
+      token = data.nextToken;
+    } while (token);
+    return all;
+  }, [prefix, searchQuery]);
+
   const handleCopyLink = async (key: string) => {
     try {
       const result = await getLink(key);
@@ -329,7 +347,10 @@ export function App() {
 
   const handleBulkCopyLinks = async () => {
     if (!can("copyLink")) return;
-    const keys = selectedKeys.size ? Array.from(selectedKeys) : objects.map((obj) => obj.key);
+    const keys =
+      selectedKeys.size > 0
+        ? Array.from(selectedKeys)
+        : (await fetchAllObjectsForCopy()).map((obj) => obj.key);
     if (!keys.length) {
       setError("No files to copy from this folder");
       return;
@@ -352,6 +373,20 @@ export function App() {
       setError(msg);
       if (isUnauthorized(err)) logout();
     }
+  };
+
+  const sortedObjects = useMemo(() => {
+    const list = [...objects];
+    list.sort((a, b) => {
+      const aTime = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+      const bTime = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+      return lastModifiedSort === "desc" ? bTime - aTime : aTime - bTime;
+    });
+    return list;
+  }, [objects, lastModifiedSort]);
+
+  const toggleLastModifiedSort = () => {
+    setLastModifiedSort((prev) => (prev === "desc" ? "asc" : "desc"));
   };
 
   const handlePreview = async (key: string) => {
@@ -668,7 +703,13 @@ export function App() {
               </span>
               <span>Name</span>
               <span>Size</span>
-              <span>Last modified</span>
+              <span>
+                <button className="sortable" onClick={toggleLastModifiedSort} title="Sort by last modified">
+                  <ArrowDownUp size={14} />
+                  <span>Last modified</span>
+                  <span className="sort-indicator">{lastModifiedSort === "desc" ? "DESC" : "ASC"}</span>
+                </button>
+              </span>
               <span>Actions</span>
             </div>
             {loading && <div className="empty">Loading...</div>}
@@ -696,7 +737,7 @@ export function App() {
                 </div>
               </div>
             ))}
-            {objects.map((object) => (
+            {sortedObjects.map((object) => (
               <div key={object.key} className="list-row">
                 <div className="selection-cell">
                   <input
