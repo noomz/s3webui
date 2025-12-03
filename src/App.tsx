@@ -13,11 +13,21 @@ import {
   Upload,
   UploadCloud,
 } from "lucide-react";
-import { createFolder, deleteObject, fetchMeta, getLink, listObjects, uploadFiles } from "./client/api";
+import {
+  createFolder,
+  deleteObject,
+  fetchMeta,
+  getLink,
+  listObjects,
+  uploadFiles,
+  fetchUsers,
+  createUserApi,
+  updateUserApi,
+  deleteUserApi,
+} from "./client/api";
 import { UserManagement } from "./components/UserManagement";
 import { Login } from "./components/Login";
-import { useUsers } from "./hooks/useUsers";
-import type { BucketMeta, PermissionKey, S3Folder, S3ObjectSummary } from "./types";
+import type { BucketMeta, PermissionKey, S3Folder, S3ObjectSummary, User } from "./types";
 import { auth } from "./client/auth";
 
 const readableSize = (size: number) => {
@@ -67,28 +77,57 @@ export function App() {
   const [newFolderName, setNewFolderName] = useState("");
   const [isAuthed, setIsAuthed] = useState(() => Boolean(auth.token));
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
   const isUnauthorized = (err: unknown) =>
     err instanceof Error && /unauthorized/i.test(err.message || "");
 
+  const syncCurrentUser = (list: User[]) => {
+    if (!list.length) {
+      setUsers([]);
+      setCurrentUserId("");
+      return;
+    }
+    const [firstUser] = list as [User, ...User[]];
+    setUsers(list);
+    if (!currentUserId || !list.find((u) => u.id === currentUserId)) {
+      setCurrentUserId(firstUser.id);
+    }
+  };
+
+  const loadUsers = useCallback(async () => {
+    if (!isAuthed) return;
+    try {
+      const fetched = (await fetchUsers()) as User[];
+      syncCurrentUser(fetched);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to load users";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  }, [isAuthed, currentUserId]);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
-
-  const { users, currentUser, currentUserId, setCurrentUserId, addUser, updateUser, updatePermissions, removeUser } =
-    useUsers();
+  const dropZoneRef = useRef<HTMLDivElement | null>(null);
 
   const isAdminRoute = path.startsWith("/admin");
 
   const permissions = useMemo(
-    () =>
-      currentUser?.permissions || {
-        list: false,
-        createFolder: false,
-        upload: false,
-        delete: false,
-        copyLink: false,
-        copySignedUrl: false,
-      },
-    [currentUser],
+    () => {
+      const currentUser = users.find((u) => u.id === currentUserId);
+      return (
+        currentUser?.permissions || {
+          list: false,
+          createFolder: false,
+          upload: false,
+          delete: false,
+          copyLink: false,
+          copySignedUrl: false,
+        }
+      );
+    },
+    [users, currentUserId],
   );
 
   const loadObjects = useCallback(async () => {
@@ -129,6 +168,11 @@ export function App() {
   }, [isAuthed]);
 
   useEffect(() => {
+    if (!isAuthed) return;
+    void loadUsers();
+  }, [isAuthed, loadUsers]);
+
+  useEffect(() => {
     if (!meta || !isAuthed) return;
     void loadObjects();
   }, [loadObjects, meta, isAuthed]);
@@ -159,6 +203,8 @@ export function App() {
     setFolders([]);
     setObjects([]);
     setPrefix("");
+    setUsers([]);
+    setCurrentUserId("");
   };
 
   const goUp = () => {
@@ -183,22 +229,25 @@ export function App() {
     }
   };
 
-  const handleUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setMessage(`Uploading ${files.length} item(s)...`);
-    try {
-      await uploadFiles(prefix, Array.from(files).map((file) => file as File & { webkitRelativePath?: string }));
-      setMessage("Upload complete");
-      void loadObjects();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
-      setError(msg);
-      if (isUnauthorized(err)) logout();
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      if (folderInputRef.current) folderInputRef.current.value = "";
-    }
-  };
+  const handleUpload = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      setMessage(`Uploading ${files.length} item(s)...`);
+      try {
+        await uploadFiles(prefix, Array.from(files).map((file) => file as File & { webkitRelativePath?: string }));
+        setMessage("Upload complete");
+        await loadObjects();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setError(msg);
+        if (isUnauthorized(err)) logout();
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        if (folderInputRef.current) folderInputRef.current.value = "";
+      }
+    },
+    [prefix, loadObjects, isUnauthorized],
+  );
 
   const handleDelete = async (key: string) => {
     if (!confirm(`Delete ${key}?`)) return;
@@ -231,6 +280,81 @@ export function App() {
       window.open(result.url, "_blank", "noopener,noreferrer");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to open preview";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
+  useEffect(() => {
+    const zone = dropZoneRef.current;
+    if (!zone) return;
+    const onDragOver = (event: DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      zone.classList.add("dropping");
+    };
+    const onDragLeave = (event: DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      zone.classList.remove("dropping");
+    };
+    const onDrop = (event: DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      zone.classList.remove("dropping");
+      const items = event.dataTransfer?.files;
+      void handleUpload(items || null);
+    };
+    zone.addEventListener("dragover", onDragOver);
+    zone.addEventListener("dragleave", onDragLeave);
+    zone.addEventListener("drop", onDrop);
+    return () => {
+      zone.removeEventListener("dragover", onDragOver);
+      zone.removeEventListener("dragleave", onDragLeave);
+      zone.removeEventListener("drop", onDrop);
+    };
+  }, [handleUpload]);
+
+  const handleAddUser = async (name: string) => {
+    try {
+      const created = await createUserApi(name);
+      await loadUsers();
+      if (created?.id) setCurrentUserId(created.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to add user";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
+  const handleUpdateUserMeta = async (id: string, updates: Partial<User>) => {
+    try {
+      await updateUserApi(id, updates);
+      await loadUsers();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to update user";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
+  const handleUpdatePermissions = async (id: string, perms: Record<PermissionKey, boolean>) => {
+    try {
+      await updateUserApi(id, { permissions: perms });
+      await loadUsers();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to update permissions";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
+  const handleRemoveUser = async (id: string) => {
+    try {
+      await deleteUserApi(id);
+      await loadUsers();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to remove user";
       setError(msg);
       if (isUnauthorized(err)) logout();
     }
@@ -285,7 +409,7 @@ export function App() {
       </header>
 
       {!isAdminRoute && (
-        <section className="panel">
+        <section className="panel dropzone" ref={dropZoneRef}>
           <header className="panel-header">
             <div className="path-row">
               <button className="ghost" onClick={goUp} disabled={!prefix} title="Up one level">
@@ -451,10 +575,10 @@ export function App() {
           currentUserId={currentUserId}
           editingUserId={editingUserId}
           onSelectUser={setCurrentUserId}
-          onAddUser={addUser}
-          onUpdateUser={updateUser}
-          onUpdatePermissions={updatePermissions}
-          onRemoveUser={removeUser}
+          onAddUser={handleAddUser}
+          onUpdateUser={handleUpdateUserMeta}
+          onUpdatePermissions={handleUpdatePermissions}
+          onRemoveUser={handleRemoveUser}
           onEdit={(id) => setEditingUserId(id)}
           onDoneEditing={() => setEditingUserId(null)}
         />

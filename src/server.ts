@@ -11,6 +11,13 @@ import {
   uploadToPrefix,
 } from "./server/aws";
 import { objectsPublicByDefault, serverConfig } from "./server/config";
+import {
+  createUser,
+  deleteUser as removeUser,
+  ensureAdminUser,
+  listUsers,
+  updateUser as editUser,
+} from "./server/users";
 
 const distDir = path.resolve(import.meta.dir, "../dist");
 const indexHtml = path.join(distDir, "index.html");
@@ -45,6 +52,8 @@ async function handleApi(req: Request) {
   const { pathname } = url;
 
   try {
+    ensureAdminUser();
+
     if (pathname !== "/api/login") {
       const payload = verifyAuth(req);
       if (!payload) return unauthorized;
@@ -74,6 +83,29 @@ async function handleApi(req: Request) {
       const pageSize = Number(url.searchParams.get("pageSize") || 50);
       const data = await fetchObjects({ prefix, token, pageSize });
       return sendJson(data);
+    }
+
+    if (pathname === "/api/users" && req.method === "GET") {
+      return sendJson(listUsers());
+    }
+
+    if (pathname === "/api/users" && req.method === "POST") {
+      const body = await req.json();
+      const user = createUser(body?.name || "User", body?.permissions);
+      return sendJson(user, { status: 201 });
+    }
+
+    if (pathname.startsWith("/api/users/") && req.method === "PUT") {
+      const id = pathname.split("/").pop() || "";
+      const body = await req.json();
+      editUser(id, body || {});
+      return sendJson({ ok: true });
+    }
+
+    if (pathname.startsWith("/api/users/") && req.method === "DELETE") {
+      const id = pathname.split("/").pop() || "";
+      removeUser(id);
+      return sendJson({ ok: true });
     }
 
     if (pathname === "/api/folder" && req.method === "POST") {

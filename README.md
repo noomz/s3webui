@@ -10,6 +10,7 @@ A lightweight React UI for browsing and managing a single S3 bucket. Runs on Bun
 - User management UI with per-action permissions stored locally
 - Pagination for large buckets (50 items per page)
 - Auth-required APIs with simple JWT login (admin secret env) and protected `/admin` page
+- Users persisted in SQLite (server side)
 
 ## Setup
 1) Install dependencies
@@ -27,7 +28,7 @@ Required env keys:
 - `AWS_REGION`
 - `S3_BUCKET`
 - Auth: `ADMIN_SECRET` (shared secret to log in), `JWT_SECRET` (signing key)
-- Optional: `AWS_SESSION_TOKEN`, `DEFAULT_OBJECT_ACL` (default `private`), `PUBLIC_BASE_URL`, `SIGNED_URL_TTL`
+- Optional: `AWS_SESSION_TOKEN`, `DEFAULT_OBJECT_ACL` (default `private`), `PUBLIC_BASE_URL`, `SIGNED_URL_TTL`, `DB_PATH`
 
 3) Build the client
 ```bash

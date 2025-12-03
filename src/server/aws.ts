@@ -61,6 +61,12 @@ export async function fetchObjects(params: { prefix?: string; token?: string | n
       lastModified: item.LastModified?.toISOString(),
     })) || [];
 
+  objects.sort((a, b) => {
+    const aTime = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+    const bTime = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+    return bTime - aTime;
+  });
+
   return { folders, objects, nextToken: response.NextContinuationToken };
 }
 

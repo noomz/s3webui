@@ -73,3 +73,31 @@ export async function login(secret: string) {
   if (data?.token) auth.token = data.token;
   return data;
 }
+
+export async function fetchUsers() {
+  const res = await authorizedFetch("/api/users");
+  return toJson(res);
+}
+
+export async function createUserApi(name: string) {
+  const res = await authorizedFetch("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return toJson(res);
+}
+
+export async function updateUserApi(id: string, updates: any) {
+  const res = await authorizedFetch(`/api/users/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  return toJson(res);
+}
+
+export async function deleteUserApi(id: string) {
+  const res = await authorizedFetch(`/api/users/${id}`, { method: "DELETE" });
+  return toJson(res);
+}
