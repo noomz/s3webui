@@ -81,6 +81,8 @@ const readPrefixFromUrl = () => {
   return url.searchParams.get("prefix") || "";
 };
 
+const toastDuration = 4200;
+
 const fileIconForKey = (key: string) => {
   const ext = (key.split(".").pop() || "").toLowerCase();
   if (!ext || !key.includes(".")) return FileText;
@@ -104,8 +106,6 @@ export function App() {
   const [pageTokens, setPageTokens] = useState<string[]>([""]);
   const [pageIndex, setPageIndex] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -114,7 +114,26 @@ export function App() {
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [toasts, setToasts] = useState<{ id: number; text: string; type: "info" | "success" | "error" }[]>([]);
   const isUnauthorized = (err: unknown) => err instanceof Error && /unauthorized/i.test(err.message || "");
+
+  const addToast = useCallback(
+    (text: string, type: "info" | "success" | "error" = "info") => {
+      const id = Date.now() + Math.floor(Math.random() * 1000);
+      setToasts((prev) => [...prev, { id, text, type }]);
+      const timer = window.setTimeout(() => {
+        setToasts((prev) => prev.filter((toast) => toast.id !== id));
+      }, toastDuration);
+      toastTimerRef.current[id] = timer;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      Object.values(toastTimerRef.current).forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
 
   const syncCurrentUser = (list: User[]) => {
     if (!list.length) {
@@ -136,15 +155,16 @@ export function App() {
       syncCurrentUser(fetched);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to load users";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
-  }, [isAuthed, currentUserId]);
+  }, [isAuthed, currentUserId, addToast]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const toastTimerRef = useRef<Record<number, number>>({});
 
   const isAdminRoute = path.startsWith("/admin");
 
@@ -165,7 +185,6 @@ export function App() {
   const loadObjects = useCallback(async () => {
     if (!permissions.list) return;
     setLoading(true);
-    setError(null);
     setNextToken(undefined);
     try {
       const data = await listObjects({
@@ -179,12 +198,12 @@ export function App() {
       setNextToken(data.nextToken);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to list objects";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     } finally {
       setLoading(false);
     }
-  }, [permissions.list, prefix, pageIndex, pageTokens, searchQuery]);
+  }, [permissions.list, prefix, pageIndex, pageTokens, searchQuery, addToast]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -194,11 +213,11 @@ export function App() {
         setMeta(info);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unable to load bucket metadata";
-        setError(msg);
+        addToast(msg, "error");
         if (isUnauthorized(err)) logout();
       }
     })();
-  }, [isAuthed]);
+  }, [isAuthed, addToast]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -296,11 +315,11 @@ export function App() {
     try {
       await createFolder({ prefix, name: newFolderName.trim() });
       setNewFolderName("");
-      setMessage(`Created ${newFolderName}`);
+      addToast(`Created ${newFolderName}`, "success");
       void loadObjects();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to create folder";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -308,35 +327,35 @@ export function App() {
   const handleUpload = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
-      setMessage(`Uploading ${files.length} item(s)...`);
+      addToast(`Uploading ${files.length} item(s)...`, "info");
       try {
         await uploadFiles(
           prefix,
           Array.from(files).map((file) => file as File & { webkitRelativePath?: string }),
         );
-        setMessage("Upload complete");
+        addToast("Upload complete", "success");
         await loadObjects();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Upload failed";
-        setError(msg);
+        addToast(msg, "error");
         if (isUnauthorized(err)) logout();
       } finally {
         if (fileInputRef.current) fileInputRef.current.value = "";
         if (folderInputRef.current) folderInputRef.current.value = "";
       }
     },
-    [prefix, loadObjects, isUnauthorized],
+    [prefix, loadObjects, isUnauthorized, addToast],
   );
 
   const handleDelete = async (key: string) => {
     if (!confirm(`Delete ${key}?`)) return;
     try {
       await deleteObject(key);
-      setMessage(`Deleted ${key}`);
+      addToast(`Deleted ${key}`, "success");
       void loadObjects();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to delete object";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -361,10 +380,10 @@ export function App() {
     try {
       const result = await getLink(key);
       await copyToClipboard(result.url);
-      setMessage(`${result.kind === "public" ? "Public" : "Signed"} link copied`);
+      addToast(`${result.kind === "public" ? "Public" : "Signed"} link copied`, "success");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to create link";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -392,11 +411,10 @@ export function App() {
       );
     }
     if (!keys.length) {
-      setError("No files to copy from this folder");
+      addToast("No files to copy from this folder", "error");
       return;
     }
-    setError(null);
-    setMessage(`Copying ${keys.length} link(s)...`);
+    addToast(`Copying ${keys.length} link(s)...`, "info");
     try {
       const links = await Promise.all(
         keys.map(async (key) => {
@@ -405,12 +423,10 @@ export function App() {
         }),
       );
       await copyToClipboard(links.join("\n"));
-      setMessage(
-        `Copied ${keys.length} link(s) ${selectedKeys.size ? "from selection" : "from current folder"}`,
-      );
+      addToast(`Copied ${keys.length} link(s) ${selectedKeys.size ? "from selection" : "from current folder"}`, "success");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to copy links";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -435,7 +451,7 @@ export function App() {
       window.open(result.url, "_blank", "noopener,noreferrer");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to open preview";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -477,7 +493,7 @@ export function App() {
       if (created?.id) setCurrentUserId(created.id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to add user";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -488,7 +504,7 @@ export function App() {
       await loadUsers();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to update user";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -499,7 +515,7 @@ export function App() {
       await loadUsers();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to update permissions";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -510,7 +526,7 @@ export function App() {
       await loadUsers();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to remove user";
-      setError(msg);
+      addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
   };
@@ -577,8 +593,6 @@ export function App() {
               {isAdminRoute ? "Go to bucket" : "Admin"}
             </button>
           </div>
-          {message && <span className="pill success">{message}</span>}
-          {error && <span className="pill danger">{error}</span>}
         </div>
       </header>
 
@@ -865,6 +879,20 @@ export function App() {
           onDoneEditing={() => setEditingUserId(null)}
         />
       )}
+      <ToastStack toasts={toasts} />
     </div>
   );
 }
+
+const ToastStack = ({ toasts }: { toasts: { id: number; text: string; type: "info" | "success" | "error" }[] }) => {
+  if (!toasts.length) return null;
+  return (
+    <div className="toast-stack" aria-live="polite">
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`toast toast-${toast.type}`}>
+          {toast.text}
+        </div>
+      ))}
+    </div>
+  );
+};
