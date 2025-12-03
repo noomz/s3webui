@@ -13,6 +13,8 @@ import type { BucketMeta, S3Folder, S3ObjectSummary } from "../types";
 
 const client = new S3Client({
   region: serverConfig.region,
+  endpoint: serverConfig.endpoint,
+  forcePathStyle: Boolean(serverConfig.endpoint),
   credentials: {
     accessKeyId: serverConfig.accessKeyId,
     secretAccessKey: serverConfig.secretAccessKey,

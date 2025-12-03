@@ -10,6 +10,7 @@ export const serverConfig = {
   sessionToken: process.env.AWS_SESSION_TOKEN || process.env.VITE_AWS_SESSION_TOKEN || "",
   region: requiredEnv("AWS_REGION", process.env.VITE_AWS_REGION),
   bucket: requiredEnv("S3_BUCKET", process.env.VITE_S3_BUCKET),
+  endpoint: process.env.AWS_ENDPOINT || process.env.VITE_AWS_ENDPOINT,
   defaultObjectAcl: process.env.DEFAULT_OBJECT_ACL || process.env.VITE_DEFAULT_OBJECT_ACL || "private",
   publicBaseUrl: process.env.PUBLIC_BASE_URL || process.env.VITE_PUBLIC_BASE_URL,
   signedUrlTtl: Number(process.env.SIGNED_URL_TTL || process.env.VITE_SIGNED_URL_TTL || 3600),

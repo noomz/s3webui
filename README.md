@@ -12,6 +12,18 @@ A lightweight React UI for browsing and managing a single S3 bucket. Runs on Bun
 - Auth-required APIs with simple JWT login (admin secret env) and protected `/admin` page
 - Users persisted in SQLite (server side)
 
+## Screenshots
+
+### Main View
+Browse your S3 bucket with folder-style navigation and file management actions.
+
+![Main View](screenshots/02-main-view.png)
+
+### Documents Folder
+View different file types with recognizable icons (.pdf, .docx, .xlsx, .pptx, .txt, .md).
+
+![Documents Folder](screenshots/03-documents-folder.png)
+
 ## Setup
 1) Install dependencies
 ```bash
@@ -28,7 +40,7 @@ Required env keys:
 - `AWS_REGION`
 - `S3_BUCKET`
 - Auth: `ADMIN_SECRET` (shared secret to log in), `JWT_SECRET` (signing key)
-- Optional: `AWS_SESSION_TOKEN`, `DEFAULT_OBJECT_ACL` (default `private`), `PUBLIC_BASE_URL`, `SIGNED_URL_TTL`, `DB_PATH`
+- Optional: `AWS_ENDPOINT` (for S3-compatible services like MinIO), `AWS_SESSION_TOKEN`, `DEFAULT_OBJECT_ACL` (default `private`), `PUBLIC_BASE_URL`, `SIGNED_URL_TTL`, `DB_PATH`
 
 3) Build the client
 ```bash
@@ -59,6 +71,18 @@ Or with compose:
 ```bash
 docker compose up --build
 ```
+
+### Demo with MinIO
+To run a complete demo environment with MinIO (S3-compatible storage):
+```bash
+docker compose -f docker-compose.demo.yml up --build
+```
+This starts:
+- MinIO server on ports 9000 (API) and 9001 (Console)
+- S3 Web UI on port 5175
+- Pre-configured demo bucket with sample files
+
+Access the demo at http://localhost:5175 (password: `demo-admin-secret`)
 
 ## Usage notes
 - Default admin user has all permissions; add/manage more users in the UI. Choices persist in `localStorage`.
