@@ -15,6 +15,8 @@ import {
   Upload,
   UploadCloud,
 } from "lucide-react";
+import Tippy from "@tippyjs/react";
+import "tippy.js/dist/tippy.css";
 import {
   createFolder,
   deleteObject,
@@ -734,7 +736,16 @@ export function App() {
               <div key={folder.prefix} className="list-row">
                 <div className="selection-cell muted">—</div>
                 <div className="name" onClick={() => changePrefix(folder.prefix)}>
-                  📁 {folder.name || "/"}
+                  <span className="name-icon">📁</span>
+                  <Tippy
+                    content={folder.name || "/"}
+                    placement="top"
+                    delay={[150, 0]}
+                    theme="name"
+                    appendTo={typeof document !== "undefined" ? () => document.body : undefined}
+                  >
+                    <span className="name-text" aria-label={folder.name || "/"}>{folder.name || "/"}</span>
+                  </Tippy>
                 </div>
                 <div className="muted">—</div>
                 <div className="muted">—</div>
@@ -763,7 +774,18 @@ export function App() {
                     onChange={() => toggleSelection(object.key)}
                   />
                 </div>
-                <div className="name">📄 {object.key.slice(prefix.length)}</div>
+                <div className="name">
+                  <span className="name-icon">📄</span>
+                  <Tippy
+                    content={object.key}
+                    placement="top"
+                    delay={[150, 0]}
+                    theme="name"
+                    appendTo={typeof document !== "undefined" ? () => document.body : undefined}
+                  >
+                    <span className="name-text" aria-label={object.key}>{object.key.slice(prefix.length)}</span>
+                  </Tippy>
+                </div>
                 <div>{readableSize(object.size)}</div>
                 <div className="muted">
                   {object.lastModified ? new Date(object.lastModified).toLocaleString() : "—"}

@@ -234,10 +234,25 @@ input {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  min-width: 0;
+  overflow: visible;
 }
 
 .list-row .name button {
   padding: 0;
+}
+
+.name-icon {
+  flex-shrink: 0;
+}
+
+.name-text {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .selection-cell {
@@ -277,6 +292,20 @@ input {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.tippy-box[data-theme~="name"] {
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 10px;
+  padding: 6px 10px;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.28);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.tippy-box[data-theme~="name"] .tippy-arrow {
+  color: #0f172a;
 }
 
 .empty {
