@@ -209,7 +209,7 @@ input {
 .list-head,
 .list-row {
   display: grid;
-  grid-template-columns: 1.3fr 0.6fr 0.8fr 0.9fr;
+  grid-template-columns: 40px 1.3fr 0.6fr 0.8fr 0.9fr;
   gap: 12px;
   padding: 12px 14px;
   align-items: center;
@@ -240,6 +240,21 @@ input {
   padding: 0;
 }
 
+.selection-cell {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.selection-cell input {
+  width: 16px;
+  height: 16px;
+}
+
+.selection-cell.muted {
+  color: #cbd5e1;
+}
+
 .row-actions {
   display: flex;
   gap: 8px;
@@ -249,6 +264,29 @@ input {
 .empty {
   padding: 16px;
   color: #475569;
+}
+
+.bulk-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 18px;
+  border: 1px solid #e2e8f0;
+  border-width: 0 0 1px 0;
+  border-radius: 0;
+  background: #f8fafc;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.bulk-summary {
+  color: #475569;
+  font-weight: 600;
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .status {

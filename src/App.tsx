@@ -77,6 +77,7 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [isAuthed, setIsAuthed] = useState(() => Boolean(auth.token));
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -111,6 +112,7 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   const isAdminRoute = path.startsWith("/admin");
 
@@ -178,6 +180,10 @@ export function App() {
   }, [searchQuery]);
 
   useEffect(() => {
+    setSelectedKeys(new Set());
+  }, [prefix, pageIndex, searchQuery]);
+
+  useEffect(() => {
     if (!meta || !isAuthed) return;
     void loadObjects();
   }, [loadObjects, meta, isAuthed]);
@@ -187,6 +193,22 @@ export function App() {
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, []);
+
+  useEffect(() => {
+    setSelectedKeys((prev) => {
+      const keysOnPage = new Set(objects.map((obj) => obj.key));
+      const next = new Set(Array.from(prev).filter((key) => keysOnPage.has(key)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [objects]);
+
+  useEffect(() => {
+    const checkbox = selectAllRef.current;
+    if (!checkbox) return;
+    const total = objects.length;
+    const selected = selectedKeys.size;
+    checkbox.indeterminate = selected > 0 && selected < total;
+  }, [objects.length, selectedKeys]);
 
   const navigate = (nextPath: string) => {
     if (typeof window === "undefined") return;
@@ -282,6 +304,33 @@ export function App() {
     }
   };
 
+  const handleBulkCopyLinks = async () => {
+    if (!can("copyLink")) return;
+    const keys = selectedKeys.size ? Array.from(selectedKeys) : objects.map((obj) => obj.key);
+    if (!keys.length) {
+      setError("No files to copy from this folder");
+      return;
+    }
+    setError(null);
+    setMessage(`Copying ${keys.length} link(s)...`);
+    try {
+      const links = await Promise.all(
+        keys.map(async (key) => {
+          const result = await getLink(key);
+          return result.url;
+        }),
+      );
+      await copyToClipboard(links.join("\n"));
+      setMessage(
+        `Copied ${keys.length} link(s) ${selectedKeys.size ? "from selection" : "from current folder"}`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to copy links";
+      setError(msg);
+      if (isUnauthorized(err)) logout();
+    }
+  };
+
   const handlePreview = async (key: string) => {
     try {
       const result = await getLink(key);
@@ -369,6 +418,25 @@ export function App() {
   };
 
   const can = (permission: PermissionKey) => Boolean(permissions[permission]);
+
+  const toggleSelection = (key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const selectAllOnPage = () => {
+    if (!objects.length) return;
+    const allKeys = objects.map((obj) => obj.key);
+    const shouldSelectAll = selectedKeys.size !== allKeys.length;
+    setSelectedKeys(shouldSelectAll ? new Set(allKeys) : new Set());
+  };
 
   if (!isAuthed) {
     return (
@@ -538,8 +606,43 @@ export function App() {
             </div>
           </div>
 
+          <div className="bulk-row">
+            <div className="bulk-summary">
+              {selectedKeys.size
+                ? `Selected ${selectedKeys.size} item(s)`
+                : `No selection — action applies to ${objects.length ? "all files in this view" : "none"}`}
+            </div>
+            <div className="bulk-actions">
+              <button
+                onClick={handleBulkCopyLinks}
+                disabled={!can("copyLink") || loading || (!objects.length && selectedKeys.size === 0)}
+                title="Copy links for this folder or selection"
+              >
+                <Link2 size={16} /> Copy links
+              </button>
+              <button
+                className="ghost"
+                onClick={() => setSelectedKeys(new Set())}
+                disabled={selectedKeys.size === 0}
+                title="Clear selection"
+              >
+                Clear selection
+              </button>
+            </div>
+          </div>
+
           <div className="list">
             <div className="list-head">
+              <span className="selection-cell">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  aria-label="Select all files on this page"
+                  checked={objects.length > 0 && selectedKeys.size === objects.length}
+                  onChange={selectAllOnPage}
+                  disabled={!objects.length}
+                />
+              </span>
               <span>Name</span>
               <span>Size</span>
               <span>Last modified</span>
@@ -549,6 +652,7 @@ export function App() {
             {!loading && folders.length === 0 && objects.length === 0 && <div className="empty">Empty path</div>}
             {folders.map((folder) => (
               <div key={folder.prefix} className="list-row">
+                <div className="selection-cell muted">—</div>
                 <div className="name" onClick={() => changePrefix(folder.prefix)}>
                   📁 {folder.name || "/"}
                 </div>
@@ -571,6 +675,14 @@ export function App() {
             ))}
             {objects.map((object) => (
               <div key={object.key} className="list-row">
+                <div className="selection-cell">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${object.key.slice(prefix.length)}`}
+                    checked={selectedKeys.has(object.key)}
+                    onChange={() => toggleSelection(object.key)}
+                  />
+                </div>
                 <div className="name">📄 {object.key.slice(prefix.length)}</div>
                 <div>{readableSize(object.size)}</div>
                 <div className="muted">
