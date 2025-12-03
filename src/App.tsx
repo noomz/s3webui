@@ -347,10 +347,26 @@ export function App() {
 
   const handleBulkCopyLinks = async () => {
     if (!can("copyLink")) return;
-    const keys =
-      selectedKeys.size > 0
-        ? Array.from(selectedKeys)
-        : (await fetchAllObjectsForCopy()).map((obj) => obj.key);
+    const sortKeysByLastModified = (keys: string[], source: S3ObjectSummary[]) => {
+      const times = new Map(source.map((obj) => [obj.key, obj.lastModified ? new Date(obj.lastModified).getTime() : 0]));
+      return [...keys].sort((a, b) => {
+        const aTime = times.get(a) ?? 0;
+        const bTime = times.get(b) ?? 0;
+        return lastModifiedSort === "desc" ? bTime - aTime : aTime - bTime;
+      });
+    };
+
+    let keys: string[] = [];
+    if (selectedKeys.size > 0) {
+      const selectedObjects = sortedObjects.filter((obj) => selectedKeys.has(obj.key));
+      keys = sortKeysByLastModified(Array.from(selectedKeys), selectedObjects);
+    } else {
+      const allObjects = await fetchAllObjectsForCopy();
+      keys = sortKeysByLastModified(
+        allObjects.map((obj) => obj.key),
+        allObjects,
+      );
+    }
     if (!keys.length) {
       setError("No files to copy from this folder");
       return;
