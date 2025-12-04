@@ -108,6 +108,7 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [lastModifiedSort, setLastModifiedSort] = useState<"asc" | "desc">("desc");
   const [isAuthed, setIsAuthed] = useState(() => Boolean(auth.token));
@@ -191,7 +192,7 @@ export function App() {
         prefix,
         token: pageTokens[pageIndex] || undefined,
         pageSize: 50,
-        search: searchQuery || undefined,
+        search: debouncedSearch || undefined,
       });
       setFolders(data.folders);
       setObjects(data.objects);
@@ -203,7 +204,7 @@ export function App() {
     } finally {
       setLoading(false);
     }
-  }, [permissions.list, prefix, pageIndex, pageTokens, searchQuery, addToast]);
+  }, [permissions.list, prefix, pageIndex, pageTokens, debouncedSearch, addToast]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -231,8 +232,13 @@ export function App() {
   }, [searchQuery]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 1000);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
     setSelectedKeys(new Set());
-  }, [prefix, pageIndex, searchQuery]);
+  }, [prefix, pageIndex, debouncedSearch]);
 
   useEffect(() => {
     if (!meta || !isAuthed) return;
@@ -706,8 +712,8 @@ export function App() {
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search by object key..."
-                title="Search by key name"
+                placeholder="Search by name or extension (e.g. report, .png, ext:pdf)"
+                title="Search by name, or filter by extension with .ext or ext:ext"
                 style={{ flex: 1, padding: "6px 12px", border: "1px solid #d1d5db", borderRadius: "4px" }}
               />
               {searchQuery && (

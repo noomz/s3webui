@@ -36,13 +36,41 @@ export const bucketMeta: BucketMeta = {
   publicByDefault: objectsPublicByDefault,
 };
 
+const parseSearch = (search: string) => {
+  const trimmed = search.trim().toLowerCase();
+  const extDirective = trimmed.match(/^ext:\s*(.+)$/);
+  if (extDirective && extDirective[1]) {
+    const extensions = extDirective[1]
+      .split(/[,\s]+/)
+      .map((part) => part.replace(/^\./, "").trim())
+      .filter(Boolean);
+    if (extensions.length) {
+      return { extensions };
+    }
+  }
+
+  const dotExtMatch = trimmed.match(/^\*?\.([a-z0-9][a-z0-9_-]*)$/);
+  if (dotExtMatch && dotExtMatch[1]) {
+    return { extensions: [dotExtMatch[1]] };
+  }
+
+  return { term: trimmed.length ? trimmed : undefined };
+};
+
+const extractExtension = (key: string) => {
+  const lastSlash = key.lastIndexOf("/");
+  const lastDot = key.lastIndexOf(".");
+  if (lastDot === -1 || lastDot < lastSlash) return "";
+  return key.slice(lastDot + 1).toLowerCase();
+};
+
 export async function fetchObjects(params: { prefix?: string; token?: string | null; pageSize?: number; search?: string } = {}) {
   const normalized = normalizePrefix(params.prefix || "");
   const pageSize = params.pageSize || 50;
 
   // When searching, scan the full prefix to collect matches then paginate locally by offset token
   if (params.search) {
-    const searchLower = params.search.toLowerCase();
+    const { term, extensions } = parseSearch(params.search);
     const matchedFolders: S3Folder[] = [];
     const matchedObjects: S3ObjectSummary[] = [];
     const seenFolderPrefixes = new Set<string>();
@@ -63,7 +91,8 @@ export async function fetchObjects(params: { prefix?: string; token?: string | n
 
       response.CommonPrefixes?.forEach((item) => {
         if (!item.Prefix) return;
-        if (!item.Prefix.toLowerCase().includes(searchLower)) return;
+        if (extensions) return;
+        if (term && !item.Prefix.toLowerCase().includes(term)) return;
         if (seenFolderPrefixes.has(item.Prefix)) return;
         seenFolderPrefixes.add(item.Prefix);
         const name = item.Prefix.slice(normalized.length).replace(/\/$/, "");
@@ -74,7 +103,10 @@ export async function fetchObjects(params: { prefix?: string; token?: string | n
 
       response.Contents?.forEach((item) => {
         if (!item.Key || item.Key === normalized) return;
-        if (!item.Key.toLowerCase().includes(searchLower)) return;
+        const keyLower = item.Key.toLowerCase();
+        const keyExtension = extractExtension(keyLower);
+        if (term && !keyLower.includes(term)) return;
+        if (extensions && !extensions.some((ext) => keyExtension === ext)) return;
         matchedObjects.push({
           key: item.Key,
           size: item.Size ?? 0,
