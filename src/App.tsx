@@ -39,6 +39,7 @@ import {
   deleteUserApi,
 } from "./client/api";
 import { UserManagement } from "./components/UserManagement";
+import { IndexingPanel } from "./components/IndexingPanel";
 import { Login } from "./components/Login";
 import type { BucketMeta, PermissionKey, S3Folder, S3ObjectSummary, User } from "./types";
 import { auth } from "./client/auth";
@@ -116,6 +117,7 @@ export function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [toasts, setToasts] = useState<{ id: number; text: string; type: "info" | "success" | "error" }[]>([]);
+  const [adminTab, setAdminTab] = useState<"users" | "indexing">("users");
   const isUnauthorized = (err: unknown) => err instanceof Error && /unauthorized/i.test(err.message || "");
 
   const addToast = useCallback(
@@ -364,6 +366,38 @@ export function App() {
       addToast(msg, "error");
       if (isUnauthorized(err)) logout();
     }
+  };
+
+  const handleBulkDelete = async () => {
+    const keys = Array.from(selectedKeys);
+    if (!keys.length) return;
+    if (!can("delete")) {
+      addToast("You do not have permission to delete items", "error");
+      return;
+    }
+    if (
+      !confirm(
+        `Delete ${keys.length} item(s)? This will permanently remove the selected files/folders from the bucket.`,
+      )
+    ) {
+      return;
+    }
+
+    addToast(`Deleting ${keys.length} item(s)...`, "info");
+    let deleted = 0;
+    for (const key of keys) {
+      try {
+        await deleteObject(key);
+        deleted += 1;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Delete failed";
+        addToast(`Failed to delete ${key}: ${msg}`, "error");
+      }
+    }
+
+    addToast(`Deleted ${deleted} of ${keys.length} item(s)`, deleted === keys.length ? "success" : "error");
+    setSelectedKeys(new Set());
+    void loadObjects();
   };
 
   const fetchAllObjectsForCopy = useCallback(async () => {
@@ -739,6 +773,14 @@ export function App() {
                 <Link2 size={16} /> Copy links
               </button>
               <button
+                className="danger"
+                onClick={handleBulkDelete}
+                disabled={!can("delete") || selectedKeys.size === 0}
+                title="Delete selected items"
+              >
+                <Trash2 size={16} /> Delete
+              </button>
+              <button
                 className="ghost"
                 onClick={() => setSelectedKeys(new Set())}
                 disabled={selectedKeys.size === 0}
@@ -872,18 +914,46 @@ export function App() {
       )}
 
       {isAdminRoute && (
-        <UserManagement
-          users={users}
-          currentUserId={currentUserId}
-          editingUserId={editingUserId}
-          onSelectUser={setCurrentUserId}
-          onAddUser={handleAddUser}
-          onUpdateUser={handleUpdateUserMeta}
-          onUpdatePermissions={handleUpdatePermissions}
-          onRemoveUser={handleRemoveUser}
-          onEdit={(id) => setEditingUserId(id)}
-          onDoneEditing={() => setEditingUserId(null)}
-        />
+        <div className="admin-layout">
+          <aside className="panel admin-sidebar">
+            <div>
+              <p className="eyebrow">Admin</p>
+              <h2>Controls</h2>
+              <p className="muted">Manage users and keep an index of every object for faster lookups.</p>
+            </div>
+            <div className="admin-menu">
+              <button
+                className={`ghost admin-nav-button ${adminTab === "users" ? "active" : ""}`}
+                onClick={() => setAdminTab("users")}
+              >
+                Users
+              </button>
+              <button
+                className={`ghost admin-nav-button ${adminTab === "indexing" ? "active" : ""}`}
+                onClick={() => setAdminTab("indexing")}
+              >
+                Indexing
+              </button>
+            </div>
+          </aside>
+          <div className="admin-content">
+            {adminTab === "users" && (
+              <UserManagement
+                users={users}
+                currentUserId={currentUserId}
+                editingUserId={editingUserId}
+                onSelectUser={setCurrentUserId}
+                onAddUser={handleAddUser}
+                onUpdateUser={handleUpdateUserMeta}
+                onUpdatePermissions={handleUpdatePermissions}
+                onRemoveUser={handleRemoveUser}
+                onEdit={(id) => setEditingUserId(id)}
+                onDoneEditing={() => setEditingUserId(null)}
+              />
+            )}
+            {adminTab === "indexing" && <IndexingPanel onNotify={addToast} />}
+          </div>
+        </div>
       )}
       <ToastStack toasts={toasts} />
     </div>
