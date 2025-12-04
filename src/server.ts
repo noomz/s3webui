@@ -13,12 +13,20 @@ import {
 } from "./server/aws";
 import { objectsPublicByDefault, serverConfig } from "./server/config";
 import {
+  getIndexStatus,
+  getRecentIndexedObjects,
+  rebuildIndex,
+  refreshIndex,
+  searchIndexedObjects,
+} from "./server/indexer";
+import {
   createUser,
   deleteUser as removeUser,
   ensureAdminUser,
   listUsers,
   updateUser as editUser,
 } from "./server/users";
+import { logError, logInfo } from "./server/logger";
 
 const distDir = path.resolve(import.meta.dir, "../dist");
 const indexHtml = path.join(distDir, "index.html");
@@ -153,8 +161,35 @@ async function handleApi(req: Request) {
       const link = forceSigned ? { url: await signedReadUrl(key), kind: "signed" as const } : await getReadableUrl(key);
       return sendJson(link);
     }
+
+    if (pathname === "/api/index/status" && req.method === "GET") {
+      return sendJson(getIndexStatus());
+    }
+
+    if (pathname === "/api/index/recent" && req.method === "GET") {
+      const data = getRecentIndexedObjects(20);
+      return sendJson(data);
+    }
+
+    if (pathname === "/api/index/search" && req.method === "GET") {
+      const search = url.searchParams.get("q") || undefined;
+      const pageSize = Number(url.searchParams.get("limit") || 20);
+      const offset = Number(url.searchParams.get("offset") || 0);
+      const data = searchIndexedObjects({ search, limit: pageSize, offset });
+      return sendJson(data);
+    }
+
+    if (pathname === "/api/index/rebuild" && req.method === "POST") {
+      const result = await rebuildIndex();
+      return sendJson(result);
+    }
+
+    if (pathname === "/api/index/refresh" && req.method === "POST") {
+      const result = await refreshIndex();
+      return sendJson(result);
+    }
   } catch (err) {
-    console.error(err);
+    logError(err instanceof Error ? err.message : String(err));
     return new Response(err instanceof Error ? err.message : "Server error", { status: 500 });
   }
 
@@ -185,6 +220,6 @@ const server = serve({
   },
 });
 
-console.log(
+logInfo(
   `S3 Web Admin server running on http://localhost:${server.port} → bucket ${serverConfig.bucket} (${serverConfig.region}) public default: ${objectsPublicByDefault}`,
 );

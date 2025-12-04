@@ -1,4 +1,4 @@
-import type { BucketMeta, S3Folder, S3ObjectSummary } from "../types";
+import type { BucketMeta, IndexStatus, IndexedObject, S3Folder, S3ObjectSummary } from "../types";
 import { auth, authorizedFetch } from "./auth";
 
 const toJson = async (response: Response) => {
@@ -101,4 +101,33 @@ export async function updateUserApi(id: string, updates: any) {
 export async function deleteUserApi(id: string) {
   const res = await authorizedFetch(`/api/users/${id}`, { method: "DELETE" });
   return toJson(res);
+}
+
+export async function fetchIndexStatus(): Promise<IndexStatus> {
+  const res = await authorizedFetch("/api/index/status");
+  return toJson(res);
+}
+
+export async function rebuildIndexApi() {
+  const res = await authorizedFetch("/api/index/rebuild", { method: "POST" });
+  return toJson(res) as Promise<{ indexed: number; folders?: number }>;
+}
+
+export async function refreshIndexApi() {
+  const res = await authorizedFetch("/api/index/refresh", { method: "POST" });
+  return toJson(res) as Promise<{ added: number; updated: number; removed: number; files?: number; folders?: number }>;
+}
+
+export async function fetchRecentIndex(): Promise<IndexedObject[]> {
+  const res = await authorizedFetch("/api/index/recent");
+  return toJson(res);
+}
+
+export async function searchIndex(params: { search?: string; limit?: number; offset?: number }) {
+  const url = new URL("/api/index/search", window.location.origin);
+  if (params.search) url.searchParams.set("q", params.search);
+  if (params.limit !== undefined) url.searchParams.set("limit", String(params.limit));
+  if (params.offset !== undefined) url.searchParams.set("offset", String(params.offset));
+  const res = await authorizedFetch(url);
+  return toJson(res) as Promise<{ items: IndexedObject[]; total: number }>;
 }
