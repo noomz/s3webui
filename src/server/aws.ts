@@ -5,6 +5,7 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
+  type ListObjectsV2CommandOutput,
   type PutObjectCommandInput,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -163,6 +164,46 @@ export async function fetchObjects(params: { prefix?: string; token?: string | n
   });
 
   return { folders, objects, nextToken: response.NextContinuationToken };
+}
+
+export type S3ObjectDetail = {
+  key: string;
+  size: number;
+  lastModified?: string;
+  etag?: string;
+  storageClass?: string;
+};
+
+export async function walkAllObjects(
+  params: { prefix?: string } = {},
+  onObject: (object: S3ObjectDetail) => void | Promise<void>,
+) {
+  const normalized = normalizePrefix(params.prefix || "");
+  let continuationToken: ListObjectsV2CommandOutput["NextContinuationToken"];
+
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: serverConfig.bucket,
+        Prefix: normalized,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      }),
+    );
+
+    for (const item of response.Contents || []) {
+      if (!item.Key || item.Key === normalized) continue;
+      await onObject({
+        key: item.Key,
+        size: item.Size ?? 0,
+        lastModified: item.LastModified?.toISOString(),
+        etag: item.ETag?.replace(/"/g, "") || undefined,
+        storageClass: item.StorageClass,
+      });
+    }
+
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
 }
 
 export async function createFolder(prefix: string, name: string) {

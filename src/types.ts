@@ -34,3 +34,19 @@ export type AuthState = {
   token: string;
   authenticated: boolean;
 };
+
+export type IndexStatus = {
+  objectCount: number;
+  lastFullScan: string | null;
+  lastDeltaScan: string | null;
+};
+
+export type IndexedObject = {
+  key: string;
+  name: string;
+  extension: string | null;
+  size: number;
+  lastModified: string | null;
+  updatedAt: string;
+  type: "file" | "folder";
+};
